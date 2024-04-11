@@ -1,4 +1,4 @@
-use std::{process::exit};
+use std::process::exit;
 
 mod arena_generator;
 mod core_api;
