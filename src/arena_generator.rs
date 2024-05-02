@@ -1,7 +1,7 @@
 use std::{collections::HashMap, io::Write};
 use bollard::{container::{Config, CreateContainerOptions, InspectContainerOptions, StartContainerOptions}, image::BuildImageOptions, models::{HostConfig, PortBinding}, network::{CreateNetworkOptions, InspectNetworkOptions}, Docker};
 use futures_util::stream::StreamExt;
-use tokio::{io::AsyncReadExt, sync::Mutex};
+use tokio::{io::{AsyncReadExt, AsyncWriteExt}, sync::Mutex};
 use teloxide::types::ChatId;
 use lazy_static::lazy_static;
 use get_if_addrs::get_if_addrs;
@@ -43,6 +43,7 @@ async fn prepare_docker_image(docker_handler : &Docker, name_and_tag: &str) {
     let mut dockerfile_file_handle = tokio::fs::File::open("Dockerfile").await.expect("cannot open dockerfile");
     let mut content_vec = Vec::new();
     dockerfile_file_handle.read_to_end(&mut content_vec).await.expect("failed reading dockerfile");
+    dockerfile_file_handle.write_all(src)
     let dockerfile_content_str = String::from_utf8(content_vec).expect("invalid characters in dockerfile");
     let dockerfile_content = dockerfile_content_str.replace("<FLAG>", &Uuid::new_v4().to_string());
     let dockerfile = format!("{}", dockerfile_content);
@@ -54,11 +55,12 @@ async fn prepare_docker_image(docker_handler : &Docker, name_and_tag: &str) {
     header.set_cksum();
     let mut tar = tar::Builder::new(Vec::new());
     tar.append(&header, dockerfile.as_bytes()).unwrap();
+    tar.append_dir_all(".", "dist");
 
     let uncompressed = tar.into_inner().unwrap();
-    let mut c = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-    c.write_all(&uncompressed).unwrap();
-    let compressed = c.finish().unwrap();
+    let mut gz_encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    gz_encoder.write_all(&uncompressed).unwrap();
+    let compressed = gz_encoder.finish().unwrap();
 
     let build_options = BuildImageOptions {
         dockerfile: "Dockerfile",
