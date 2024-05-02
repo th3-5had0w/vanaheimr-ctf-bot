@@ -43,7 +43,6 @@ async fn prepare_docker_image(docker_handler : &Docker, name_and_tag: &str) {
     let mut dockerfile_file_handle = tokio::fs::File::open("Dockerfile").await.expect("cannot open dockerfile");
     let mut content_vec = Vec::new();
     dockerfile_file_handle.read_to_end(&mut content_vec).await.expect("failed reading dockerfile");
-    dockerfile_file_handle.write_all(src)
     let dockerfile_content_str = String::from_utf8(content_vec).expect("invalid characters in dockerfile");
     let dockerfile_content = dockerfile_content_str.replace("<FLAG>", &Uuid::new_v4().to_string());
     let dockerfile = format!("{}", dockerfile_content);
@@ -55,7 +54,7 @@ async fn prepare_docker_image(docker_handler : &Docker, name_and_tag: &str) {
     header.set_cksum();
     let mut tar = tar::Builder::new(Vec::new());
     tar.append(&header, dockerfile.as_bytes()).unwrap();
-    tar.append_dir_all(".", "dist");
+    tar.append_dir_all(".", "dist").unwrap();
 
     let uncompressed = tar.into_inner().unwrap();
     let mut gz_encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
@@ -70,12 +69,12 @@ async fn prepare_docker_image(docker_handler : &Docker, name_and_tag: &str) {
         ..BuildImageOptions::default()
     };
 
-    let mut vkl = docker_handler.build_image(
+    let mut docker_build_image_stream = docker_handler.build_image(
         build_options, 
         None, 
         Some(compressed.into()));
     
-    while let Some(msg) = vkl.next().await {
+    while let Some(msg) = docker_build_image_stream.next().await {
         println!("Message: {:?}", msg);
     }
 }
