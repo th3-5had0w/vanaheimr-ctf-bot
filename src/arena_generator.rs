@@ -6,7 +6,7 @@ use teloxide::types::ChatId;
 use lazy_static::lazy_static;
 use get_if_addrs::get_if_addrs;
 
-use crate::network::arena_network_interface;
+use crate::network::ARENA_NETWORK_INTERFACE;
 
 use uuid::Uuid;
 
@@ -38,9 +38,10 @@ async fn create_arena_network(docker_handler : &Docker) {
     }
 }
 
-
-async fn prepare_docker_image(docker_handler : &Docker, name_and_tag: &str) {
-    let mut dockerfile_file_handle = tokio::fs::File::open("Dockerfile").await.expect("cannot open dockerfile");
+async fn prepare_challenge() -> Vec<u8> {
+    tokio::fs::copy("./dist/Dockerfile", "./Dockerfile").await.expect("failed copy Dockerfile");
+    tokio::fs::remove_file("./dist/Dockerfile").await.expect("failed cleaning Dockerfile");
+    let mut dockerfile_file_handle = tokio::fs::File::open("./Dockerfile").await.expect("cannot open dockerfile");
     let mut content_vec = Vec::new();
     dockerfile_file_handle.read_to_end(&mut content_vec).await.expect("failed reading dockerfile");
     let dockerfile_content_str = String::from_utf8(content_vec).expect("invalid characters in dockerfile");
@@ -59,7 +60,14 @@ async fn prepare_docker_image(docker_handler : &Docker, name_and_tag: &str) {
     let uncompressed = tar.into_inner().unwrap();
     let mut gz_encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
     gz_encoder.write_all(&uncompressed).unwrap();
-    let compressed = gz_encoder.finish().unwrap();
+
+    tokio::fs::copy("./Dockerfile", "./dist/Dockerfile").await.expect("failed copy Dockerfile");
+    tokio::fs::remove_file("./Dockerfile").await.expect("failed cleaning Dockerfile");
+    return gz_encoder.finish().unwrap();
+}
+
+async fn prepare_docker_image(docker_handler : &Docker, name_and_tag: &str) {
+    let challenge = prepare_challenge().await;
 
     let build_options = BuildImageOptions {
         dockerfile: "Dockerfile",
@@ -72,7 +80,7 @@ async fn prepare_docker_image(docker_handler : &Docker, name_and_tag: &str) {
     let mut docker_build_image_stream = docker_handler.build_image(
         build_options, 
         None, 
-        Some(compressed.into()));
+        Some(challenge.into()));
     
     while let Some(msg) = docker_build_image_stream.next().await {
         println!("Message: {:?}", msg);
@@ -133,7 +141,7 @@ async fn public_network_info(docker_handler : &Docker, network_name: &str) {
         scope: "local",
     };
     let docker_network_info = docker_handler.inspect_network(network_name, Some(options)).await.expect("failed getting network info");
-    let mut network_interface_guard = arena_network_interface.lock().await;
+    let mut network_interface_guard = ARENA_NETWORK_INTERFACE.lock().await;
     network_interface_guard.clone_from(&format!("br-{}", docker_network_info.id.unwrap().get(0..12).unwrap()));
 }
 
